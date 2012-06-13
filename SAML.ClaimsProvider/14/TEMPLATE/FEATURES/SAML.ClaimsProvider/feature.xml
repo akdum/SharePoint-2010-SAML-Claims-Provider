@@ -1,0 +1,6 @@
+﻿<Feature Id="6C483F17-2BAB-47B2-B285-306E0177736C" 
+				 Title="SAML Provider Feature" 
+				 Scope="Farm"
+         ReceiverAssembly="SAML.ClaimsProvider, Version=1.0.0.0, Culture=neutral, PublicKeyToken=278e4d34085c095e"
+         ReceiverClass="SAML.ClaimsProvider.ClaimsProviderReceiver" 
+				 xmlns="http://schemas.microsoft.com/sharepoint/" />
