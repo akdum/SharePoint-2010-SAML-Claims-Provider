@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Net;
+using System.Reflection;
 using System.Web.Script.Serialization;
 using Microsoft.SharePoint;
 using Microsoft.SharePoint.Administration.Claims;
@@ -152,34 +153,42 @@ namespace SAML.ClaimsProvider
 
         IEnumerable<User> GetUsers(string searchName)
         {
-            //if is not ad name.
-            if (searchName.IndexOfAny(new[] { '/', '\\' }) == -1)
+            var userUri = new Uri(SPUtility.ConcatUrls(GetUserSourceUri(), SPEncode.UrlEncode(searchName)));
+            ForceCanonicalPathAndQuery(userUri);
+            var request = WebRequest.Create(userUri);
+            using (var response = (HttpWebResponse)request.GetResponse())
             {
-                var request = WebRequest.Create(SPUtility.ConcatUrls(GetUserSourceUri(), searchName));
-                using (var response = (HttpWebResponse) request.GetResponse())
+                using (var dataStream = response.GetResponseStream())
                 {
-                    using (var dataStream = response.GetResponseStream())
+                    if (dataStream != null)
                     {
-                        if (dataStream != null)
-                        {
-                            var reader = new StreamReader(dataStream);
-                            var responseFromServer = reader.ReadToEnd();
+                        var reader = new StreamReader(dataStream);
+                        var responseFromServer = reader.ReadToEnd();
 
-                            var jsonSerializer = new JavaScriptSerializer();
-                            try
-                            {
-                                var desObj = jsonSerializer.Deserialize<RootObject>(responseFromServer);
-                                if (desObj != null && desObj.users != null) return desObj.users;
-                            }
-                            finally
-                            {
-                                reader.Close();
-                            }
+                        var jsonSerializer = new JavaScriptSerializer();
+                        try
+                        {
+                            var desObj = jsonSerializer.Deserialize<RootObject>(responseFromServer);
+                            if (desObj != null && desObj.users != null) return desObj.users;
+                        }
+                        finally
+                        {
+                            reader.Close();
                         }
                     }
                 }
             }
             return new List<User>();
+        }
+
+        void ForceCanonicalPathAndQuery(Uri uri)
+        {
+            var paq = uri.PathAndQuery; // need to access PathAndQuery
+            var flagsFieldInfo = typeof(Uri).GetField("m_Flags", BindingFlags.Instance | BindingFlags.NonPublic);
+            if (flagsFieldInfo == null) return;
+            var flags = (ulong)flagsFieldInfo.GetValue(uri);
+            flags &= ~((ulong)0x30); // Flags.PathNotCanonical|Flags.QueryNotCanonical
+            flagsFieldInfo.SetValue(uri, flags);
         }
 
         PickerEntity GetPickerEntity(string claimType, string claimValue, string email)
