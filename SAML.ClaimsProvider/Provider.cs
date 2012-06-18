@@ -6,6 +6,7 @@ using System.Net;
 using System.Reflection;
 using System.Web.Script.Serialization;
 using Microsoft.SharePoint;
+using Microsoft.SharePoint.Administration;
 using Microsoft.SharePoint.Administration.Claims;
 using Microsoft.SharePoint.Utilities;
 using Microsoft.SharePoint.WebControls;
@@ -14,6 +15,12 @@ namespace SAML.ClaimsProvider
 {
     public class Provider : SPClaimProvider
     {
+        #region Constants
+
+        const string SamlSource = "SAMLUserSource";
+
+        #endregion
+
         #region Constructor
 
         public Provider(string displayName)
@@ -92,14 +99,15 @@ namespace SAML.ClaimsProvider
             }
 
             claimValueTypes.Add
-            (Microsoft.IdentityModel.Claims.ClaimValueTypes.String);
+                (Microsoft.IdentityModel.Claims.ClaimValueTypes.String);
             claimValueTypes.Add
-            (Microsoft.IdentityModel.Claims.ClaimValueTypes.String);
+                (Microsoft.IdentityModel.Claims.ClaimValueTypes.String);
         }
 
         protected override void FillSchema(SPProviderSchema schema)
         {
-            schema.AddSchemaElement(new SPSchemaElement(PeopleEditorEntityDataKeys.DisplayName, "DisplayName", SPSchemaElementType.TableViewOnly));
+            schema.AddSchemaElement(new SPSchemaElement(PeopleEditorEntityDataKeys.DisplayName, "DisplayName",
+                                                        SPSchemaElementType.TableViewOnly));
         }
 
         protected override void FillEntityTypes(List<string> entityTypes)
@@ -113,24 +121,30 @@ namespace SAML.ClaimsProvider
             throw new NotImplementedException();
         }
 
-        protected override void FillHierarchy(Uri context, string[] entityTypes, string hierarchyNodeID, int numberOfLevels, SPProviderHierarchyTree hierarchy)
+        protected override void FillHierarchy(
+            Uri context, string[] entityTypes, string hierarchyNodeID, int numberOfLevels,
+            SPProviderHierarchyTree hierarchy)
         {
             throw new NotImplementedException();
         }
 
-        protected override void FillResolve(Uri context, string[] entityTypes, SPClaim resolveInput, List<PickerEntity> resolved)
+        protected override void FillResolve(
+            Uri context, string[] entityTypes, SPClaim resolveInput, List<PickerEntity> resolved)
         {
             var users = GetUsers(resolveInput.Value);
             resolved.AddRange(users.Select(user => GetPickerEntity(ClaimType.UPN, user.userName, user.email)));
         }
 
-        protected override void FillResolve(Uri context, string[] entityTypes, string resolveInput, List<PickerEntity> resolved)
+        protected override void FillResolve(
+            Uri context, string[] entityTypes, string resolveInput, List<PickerEntity> resolved)
         {
             var users = GetUsers(resolveInput);
             resolved.AddRange(users.Select(user => GetPickerEntity(ClaimType.UPN, user.userName, user.email)));
         }
 
-        protected override void FillSearch(Uri context, string[] entityTypes, string searchPattern, string hierarchyNodeID, int maxCount, SPProviderHierarchyTree searchTree)
+        protected override void FillSearch(
+            Uri context, string[] entityTypes, string searchPattern, string hierarchyNodeID, int maxCount,
+            SPProviderHierarchyTree searchTree)
         {
             var users = GetUsers(searchPattern);
 
@@ -142,38 +156,42 @@ namespace SAML.ClaimsProvider
 
         #region Support Methods
 
-        private SPClaim CreateClaimForSTS(string claimtype, string claimValue)
+        SPClaim CreateClaimForSTS(string claimtype, string claimValue)
         {
-
             var result = new SPClaim(claimtype, claimValue, Microsoft.IdentityModel.Claims.ClaimValueTypes.String,
-                  SPOriginalIssuers.Format(SPOriginalIssuerType.TrustedProvider, AssociatedTrustedLoginProviderName));
+                                     SPOriginalIssuers.Format(SPOriginalIssuerType.TrustedProvider,
+                                                              AssociatedTrustedLoginProviderName));
 
             return result;
         }
 
         IEnumerable<User> GetUsers(string searchName)
         {
-            var userUri = new Uri(SPUtility.ConcatUrls(GetUserSourceUri(), SPEncode.UrlEncode(searchName)));
-            ForceCanonicalPathAndQuery(userUri);
-            var request = WebRequest.Create(userUri);
-            using (var response = (HttpWebResponse)request.GetResponse())
+            var userSourceUrl = GetUserSourceUri();
+            if (!String.IsNullOrEmpty(userSourceUrl))
             {
-                using (var dataStream = response.GetResponseStream())
+                var userUri = new Uri(SPUtility.ConcatUrls(userSourceUrl, SPEncode.UrlEncode(searchName)));
+                ForceCanonicalPathAndQuery(userUri);
+                var request = WebRequest.Create(userUri);
+                using (var response = (HttpWebResponse)request.GetResponse())
                 {
-                    if (dataStream != null)
+                    using (var dataStream = response.GetResponseStream())
                     {
-                        var reader = new StreamReader(dataStream);
-                        var responseFromServer = reader.ReadToEnd();
+                        if (dataStream != null)
+                        {
+                            var reader = new StreamReader(dataStream);
+                            var responseFromServer = reader.ReadToEnd();
 
-                        var jsonSerializer = new JavaScriptSerializer();
-                        try
-                        {
-                            var desObj = jsonSerializer.Deserialize<RootObject>(responseFromServer);
-                            if (desObj != null && desObj.users != null) return desObj.users;
-                        }
-                        finally
-                        {
-                            reader.Close();
+                            var jsonSerializer = new JavaScriptSerializer();
+                            try
+                            {
+                                var desObj = jsonSerializer.Deserialize<RootObject>(responseFromServer);
+                                if (desObj != null && desObj.users != null) return desObj.users;
+                            }
+                            finally
+                            {
+                                reader.Close();
+                            }
                         }
                     }
                 }
@@ -200,7 +218,10 @@ namespace SAML.ClaimsProvider
             entity.EntityData[PeopleEditorEntityDataKeys.DisplayName] = claimValue;
             entity.EntityData[PeopleEditorEntityDataKeys.Email] = email;
 
-            entity.EntityType = String.Compare(claimType, ClaimType.emailAddress, StringComparison.OrdinalIgnoreCase) == 0 ? SPClaimEntityTypes.User : SPClaimEntityTypes.FormsRole;
+            entity.EntityType = String.Compare(claimType, ClaimType.emailAddress, StringComparison.OrdinalIgnoreCase) ==
+                                0
+                                    ? SPClaimEntityTypes.User
+                                    : SPClaimEntityTypes.FormsRole;
 
             entity.IsResolved = true;
 
@@ -209,8 +230,13 @@ namespace SAML.ClaimsProvider
 
         string GetUserSourceUri()
         {
-            var webApp = SPContext.Current.Site.WebApplication;
-            return webApp.Properties.ContainsKey("SAMLUserSource") ? (string)webApp.Properties["SAMLUserSource"] : null;
+            var farm = SPFarm.Local;
+            if (farm != null && farm.Properties.ContainsKey(SamlSource))
+            {
+                var sourceVal = farm.Properties[SamlSource];
+                return sourceVal != null ? sourceVal.ToString() : null;
+            }
+            return null;
         }
 
         #endregion
