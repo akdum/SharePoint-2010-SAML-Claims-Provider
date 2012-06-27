@@ -1,9 +1,11 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Collections.Specialized;
 using System.IO;
 using System.Linq;
 using System.Net;
 using System.Reflection;
+using System.Text;
 using System.Web.Script.Serialization;
 using Microsoft.SharePoint;
 using Microsoft.SharePoint.Administration;
@@ -170,43 +172,18 @@ namespace SAML.ClaimsProvider
             var userSourceUrl = GetUserSourceUri();
             if (!String.IsNullOrEmpty(userSourceUrl))
             {
-                var userUri = new Uri(SPUtility.ConcatUrls(userSourceUrl, SPEncode.UrlEncode(searchName)));
-                ForceCanonicalPathAndQuery(userUri);
-                var request = WebRequest.Create(userUri);
-                using (var response = (HttpWebResponse)request.GetResponse())
+                var nameValues = new NameValueCollection();
+                nameValues["userName"] = SPEncode.UrlEncode(searchName);
+                using (var webClient = new WebClient())
                 {
-                    using (var dataStream = response.GetResponseStream())
-                    {
-                        if (dataStream != null)
-                        {
-                            var reader = new StreamReader(dataStream);
-                            var responseFromServer = reader.ReadToEnd();
+                    var responseFromServer = Encoding.ASCII.GetString(webClient.UploadValues(userSourceUrl, nameValues));
 
-                            var jsonSerializer = new JavaScriptSerializer();
-                            try
-                            {
-                                var desObj = jsonSerializer.Deserialize<RootObject>(responseFromServer);
-                                if (desObj != null && desObj.users != null) return desObj.users;
-                            }
-                            finally
-                            {
-                                reader.Close();
-                            }
-                        }
-                    }
+                    var jsonSerializer = new JavaScriptSerializer();
+                    var desObj = jsonSerializer.Deserialize<RootObject>(responseFromServer);
+                    if (desObj != null && desObj.users != null) return desObj.users;
                 }
             }
             return new List<User>();
-        }
-
-        void ForceCanonicalPathAndQuery(Uri uri)
-        {
-            var paq = uri.PathAndQuery; // need to access PathAndQuery
-            var flagsFieldInfo = typeof(Uri).GetField("m_Flags", BindingFlags.Instance | BindingFlags.NonPublic);
-            if (flagsFieldInfo == null) return;
-            var flags = (ulong)flagsFieldInfo.GetValue(uri);
-            flags &= ~((ulong)0x30); // Flags.PathNotCanonical|Flags.QueryNotCanonical
-            flagsFieldInfo.SetValue(uri, flags);
         }
 
         PickerEntity GetPickerEntity(string claimType, string claimValue, string email)
